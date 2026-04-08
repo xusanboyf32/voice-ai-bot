@@ -63,24 +63,18 @@ async def transcribe(audio_bytes: bytes) -> tuple[str, str]:
     return text, language_label
 
 
-
-async def ask_llama(text: str, language: str) -> tuple[str, str]:
-    log.info("LLaMA: savol yuborilmoqda → %s", text)
+async def ask_llama(text: str, language: str) -> str:
+    log.info("LLaMA: tarjima boshlanmoqda → %s", text)
 
     if "O'zbek" in language:
-        system_prompt = (
-            "Sen aqlli ovozli assistantsan. "
-            "Foydalanuvchi o'zbek tilida gapirdi. "
-            "O'zbek tilida qisqa va aniq javob ber."
-        )
-    else:
-        system_prompt = (
-            "Sen tarjimon va aqlli assistantsan. "
-            f"Foydalanuvchi {language} tilida gapirdi. "
-            "Avval aytilgan gapni o'zbek tiliga tarjima qil, "
-            "keyin o'zbek tilida qisqa javob ber. "
-            "Faqat o'zbek tilida yoz."
-        )
+        return text  # O'zbek bo'lsa tarjima shart emas, o'zini qaytaradi
+
+    system_prompt = (
+        "Sen faqat tarjimonsan. "
+        "Berilgan matnni o'zbek tiliga tarjima qil. "
+        "Hech qanday izoh, qo'shimcha gap yozma. "
+        "Faqat tarjimani yoz."
+    )
 
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
@@ -95,13 +89,13 @@ async def ask_llama(text: str, language: str) -> tuple[str, str]:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text}
                 ],
-                "temperature": 0.7
+                "temperature": 0.3
             }
         )
         data = response.json()
 
     answer = data["choices"][0]["message"]["content"].strip()
-    log.info("LLaMA: javob tayyor → %s", answer)
+    log.info("LLaMA: tarjima tayyor → %s", answer)
     return answer
 
 
