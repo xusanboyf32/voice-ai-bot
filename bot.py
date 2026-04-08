@@ -63,8 +63,25 @@ async def transcribe(audio_bytes: bytes) -> tuple[str, str]:
     return text, language_label
 
 
-async def ask_llama(text: str) -> str:
+
+async def ask_llama(text: str, language: str) -> tuple[str, str]:
     log.info("LLaMA: savol yuborilmoqda → %s", text)
+
+    if "O'zbek" in language:
+        system_prompt = (
+            "Sen aqlli ovozli assistantsan. "
+            "Foydalanuvchi o'zbek tilida gapirdi. "
+            "O'zbek tilida qisqa va aniq javob ber."
+        )
+    else:
+        system_prompt = (
+            "Sen tarjimon va aqlli assistantsan. "
+            f"Foydalanuvchi {language} tilida gapirdi. "
+            "Avval aytilgan gapni o'zbek tiliga tarjima qil, "
+            "keyin o'zbek tilida qisqa javob ber. "
+            "Faqat o'zbek tilida yoz."
+        )
+
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -75,18 +92,8 @@ async def ask_llama(text: str) -> str:
             json={
                 "model": "llama-3.3-70b-versatile",
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Sen aqlli ovozli assistantsan. "
-                            "Foydalanuvchi qaysi tilda gaplashsa, "
-                            "o'sha tilda qisqa va aniq javob ber."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": text
-                    }
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
                 ],
                 "temperature": 0.7
             }
@@ -96,6 +103,8 @@ async def ask_llama(text: str) -> str:
     answer = data["choices"][0]["message"]["content"].strip()
     log.info("LLaMA: javob tayyor → %s", answer)
     return answer
+
+
 
 
 async def text_to_ogg(text: str) -> bytes:
@@ -134,12 +143,14 @@ async def handle_start(message: Message):
     )
 
 
+
+
 @dp.message(F.voice)
 async def handle_voice(message: Message):
     user_id = message.from_user.id
     log.info("=== Yangi ovoz. Foydalanuvchi: %s ===", user_id)
 
-    status = await message.answer("⏳ Tahlil qilinmoqda...")
+    status = await message.answer("⏳ Ovoz tahlil qilinmoqda...")
 
     try:
         # 1. Ovozni yuklab olish
@@ -156,29 +167,50 @@ async def handle_voice(message: Message):
             await status.edit_text("❌ Matn ajratib bo'lmadi, qayta urinib ko'ring.")
             return
 
-        # 3. Savolingizni ko'rsatish
         await status.edit_text(
-            f"🎤 Siz dedingiz:\n{text}\n\n"
-            f"🌐 Til: {language}\n\n"
+            f"🎤 *Ovoz qabul qilindi*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌐 Til: {language}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"🤖 AI o'ylayapti..."
         )
 
-        # 4. Matn → LLaMA javob
-        answer = await ask_llama(text)
+        # 3. Matn → LLaMA javob
+        answer = await ask_llama(text, language)
 
-        # 5. Javobni matn sifatida yuborish
-        await status.edit_text(
-            f"🎤 Siz:\n{text}\n\n"
-            f"🌐 Til: {language}\n\n"
-            f"🤖 AI javob:\n{answer}"
-        )
+        # 4. Javobni formatlash
+        is_uzbek = "O'zbek" in language
+
+        if is_uzbek:
+            result_text = (
+                f"╔════════════════════╗\n"
+                f"   🎤 Siz aytdingiz\n"
+                f"╚════════════════════╝\n"
+                f"{text}\n\n"
+                f"╔════════════════════╗\n"
+                f"   🤖 AI javob\n"
+                f"╚════════════════════╝\n"
+                f"{answer}"
+            )
+        else:
+            result_text = (
+                f"╔════════════════════╗\n"
+                f"   🎤 Siz ({language})\n"
+                f"╚════════════════════╝\n"
+                f"{text}\n\n"
+                f"╔════════════════════╗\n"
+                f"   🌐 O'zbek tarjimasi\n"
+                f"╚════════════════════╝\n"
+                f"{answer}"
+            )
+
+        await status.edit_text(result_text)
         log.info("Matnli javob yuborildi")
 
-        # 6. Javobni ovozga o'girish
+        # 5. Javobni ovozga o'girish
         log.info("Javob ovozga o'girilmoqda...")
         ogg_bytes = await text_to_ogg(answer)
 
-        # 7. Ovozli javob yuborish
         await message.answer_voice(
             voice=BufferedInputFile(ogg_bytes, filename="voice.ogg"),
             caption="🔊 AI ovozli javob"
@@ -191,6 +223,7 @@ async def handle_voice(message: Message):
     except Exception as e:
         log.error("Xatolik: %s", str(e), exc_info=True)
         await status.edit_text(f"❌ Xatolik: {str(e)}")
+
 
 
 @dp.message(F.text & ~F.text.startswith("/"))
